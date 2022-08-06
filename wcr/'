@@ -1,0 +1,6 @@
+-- Enable rust-tools inlay-hints
+local ih = require('rust-tools.inlay_hints')
+ih.set_inlay_hints();
+
+--Key mapping
+nnoremap('<Leader>li', function() ih.toggle_inlay_hints() end, 'Togger trouble')
