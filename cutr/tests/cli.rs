@@ -337,3 +337,4 @@ fn tsv_c1_8() -> TestResult {
 fn repeated_value() -> TestResult {
     run(&[BOOKS, "-c", "1,1"], "tests/expected/books.c1,1.out")
 }
+
