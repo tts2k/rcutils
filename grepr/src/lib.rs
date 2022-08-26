@@ -1,6 +1,13 @@
 use clap::{App, Arg};
 use regex::{Regex, RegexBuilder};
-use std::error::Error;
+use std::cell::RefCell;
+use std::io::{self, BufReader, BufRead};
+use std::path::Path;
+use std::{
+    error::Error,
+    fs::{read_dir, File},
+};
+use walkdir::WalkDir;
 
 type RetType<T> = Result<T, Box<dyn Error>>;
 
@@ -23,7 +30,7 @@ pub fn get_args() -> RetType<Config> {
                 .value_name("PATTERN")
                 .takes_value(true)
                 .help("Search pattern")
-                .required(true)
+                .required(true),
         )
         .arg(
             Arg::new("file")
@@ -31,35 +38,35 @@ pub fn get_args() -> RetType<Config> {
                 .takes_value(true)
                 .help("Input file(s)")
                 .default_value("-")
-                .multiple_values(true)
+                .multiple_values(true),
         )
         .arg(
             Arg::new("count")
                 .help("Count occurences")
                 .short('c')
                 .long("")
-                .takes_value(false)
+                .takes_value(false),
         )
         .arg(
             Arg::new("insensitive")
                 .help("Case-insensitive")
                 .short('i')
                 .long("insensitive")
-                .takes_value(false)
+                .takes_value(false),
         )
         .arg(
             Arg::new("invert")
                 .help("Invert match")
                 .short('v')
                 .long("invert-match")
-                .takes_value(false)
+                .takes_value(false),
         )
         .arg(
             Arg::new("recursive")
                 .help("Recursive search")
                 .short('r')
                 .long("recursive")
-                .takes_value(false)
+                .takes_value(false),
         )
         .get_matches();
 
@@ -70,19 +77,82 @@ pub fn get_args() -> RetType<Config> {
     let recursive = matches.contains_id("recursive");
     let count = matches.contains_id("count");
 
-    Ok(Config{
-        pattern: match RegexBuilder::new(&pattern).case_insensitive(insensitive).build() {
+    Ok(Config {
+        pattern: match RegexBuilder::new(&pattern)
+            .case_insensitive(insensitive)
+            .build()
+        {
             Ok(pattern) => pattern,
-            _ => return Err(From::from(format!("Invalid pattern \"{}\"", pattern)))
+            _ => return Err(From::from(format!("Invalid pattern \"{}\"", pattern))),
         },
         files,
         count,
         invert_match,
-        recursive
+        recursive,
     })
 }
 
+fn find_files(paths: &[String], recursive: bool) -> Vec<RetType<String>> {
+    let result = RefCell::<Vec<RetType<String>>>::new(vec![]);
+
+    let recursive_find = |path: &Path| match read_dir(path) {
+        Err(e) => result.borrow_mut().push(Err(Box::new(e))),
+        Ok(_) => {
+            let entries = WalkDir::new(path);
+            for entry in entries {
+                match entry {
+                    Err(e) => result.borrow_mut().push(Err(Box::new(e))),
+                    Ok(e) => {
+                        if e.path().is_file() {
+                            result
+                                .borrow_mut()
+                                .push(Ok(String::from(e.path().to_string_lossy())))
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    for path in paths {
+        let path = Path::new(path);
+
+        if path.is_file() {
+            result
+                .borrow_mut()
+                .push(Ok(String::from(path.to_string_lossy())));
+            continue;
+        }
+
+        if recursive {
+            recursive_find(&path);
+        } else {
+            result.borrow_mut().push(Err(From::from(format!(
+                "{} is a directory",
+                path.to_string_lossy()
+            ))))
+        }
+    }
+    result.into_inner()
+}
+
+fn open(filename: &str) -> RetType<Box<dyn BufRead>> {
+    match filename {
+        "-" => Ok(Box::new(BufReader::new(io::stdin()))),
+        _ => Ok(Box::new(BufReader::new(File::open(filename)))),
+    }
+}
+
 pub fn run(config: Config) -> RetType<()> {
-    dbg!(config);
+    println!("pattern \"{}\"", config.pattern);
+
+    let entries = find_files(&config.files, config.recursive);
+    for entry in entries {
+        match entry {
+            Err(e) => eprintln!("{}", e),
+            Ok(filename) => println!("file \"{}\"", filename),
+        }
+    }
+
     Ok(())
 }
